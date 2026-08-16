@@ -1,0 +1,120 @@
+/* App.css - Additional app-specific styles */
+
+/* Override disabled state for buttons */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Smooth transitions */
+.card,
+.exercise-card,
+.stat-card {
+  transition: all 0.2s ease;
+}
+
+/* Better touch targets for mobile */
+button, input {
+  min-height: 44px;
+}
+
+/* Prevent text selection on interactive elements */
+.btn, .nav-item, .day-option, .card-clickable {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Fix for iOS input zoom */
+@supports (-webkit-touch-callout: none) {
+  input[type="number"],
+  input[type="text"] {
+    font-size: 16px;
+  }
+}
+
+/* Animation for completed sets */
+.set-complete.completed {
+  animation: pop 0.3s ease;
+}
+
+@keyframes pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* Gradient text for stats */
+.stat-value {
+  background: linear-gradient(135deg, #6366f1 0%, #f472b6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Loading state */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.loading::after {
+  content: '';
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Pull to refresh indicator */
+.pull-indicator {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* Better modal on larger screens */
+@media (min-width: 430px) {
+  .modal {
+    border-radius: 24px;
+    margin: 20px;
+    max-height: calc(100vh - 40px);
+  }
+  
+  .modal-overlay {
+    align-items: center;
+  }
+}
+
+/* Landscape adjustments */
+@media (orientation: landscape) {
+  .app {
+    padding-bottom: 60px;
+  }
+  
+  .bottom-nav {
+    padding-bottom: 8px;
+  }
+}
+
+/* Hide scrollbar but keep functionality */
+.content {
+  scrollbar-width: thin;
+}
+
+/* Dark mode adjustments for OLED screens */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-dark: #000000;
+    --bg-card: #1c1c1e;
+    --border: #2c2c2e;
+  }
+}
