@@ -8,13 +8,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
         name: 'Workout Trainer',
         short_name: 'WorkoutPro',
-        description: 'Personal workout trainer to track your exercises',
-        theme_color: '#6366f1',
-        background_color: '#0f172a',
+        description: 'Personal workout trainer: run your split, log weight and reps, track progress',
+        theme_color: '#141416',
+        background_color: '#0a0a0b',
         display: 'standalone',
         orientation: 'portrait',
         scope: '/workout-trainer/',

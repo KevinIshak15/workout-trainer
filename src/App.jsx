@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { SPLITS, CATALOG, getSplit } from './data/splits'
-import { loadData, saveData, exportData, uid } from './utils/storage'
+import { loadData, saveData, exportData, parseImport, uid } from './utils/storage'
 import {
   buildExerciseSeries, summarizeSeries, listTrackedExercises, lastPerformance,
   overallStats, formatShortDate, dayKey,
@@ -40,8 +40,26 @@ function hasValues(set) {
   return (parseFloat(set.weight) || 0) > 0 && (parseInt(set.reps, 10) || 0) > 0
 }
 
+// Inputs are controlled strings, so carried-over weights are stored as strings too.
+function lastWeightFor(history, exerciseName) {
+  const last = lastPerformance(history, exerciseName)
+  return last ? String(last.maxWeight) : ''
+}
+
+// Text inputs with numeric keypads: keep digits (and one decimal point for weight) only.
+function sanitizeNumber(value, allowDecimal) {
+  const cleaned = value.replace(allowDecimal ? /[^\d.]/g : /\D/g, '')
+  if (!allowDecimal) return cleaned
+  const [head, ...rest] = cleaned.split('.')
+  return rest.length ? `${head}.${rest.join('')}` : head
+}
+
 export default function App() {
-  const [data, setData] = useState(loadData)
+  const [loaded] = useState(loadData)
+  const [data, setData] = useState(loaded.data)
+  const [storageNotice, setStorageNotice] = useState(
+    loaded.ok ? null : 'Saved data could not be read. A copy was kept in storage; new entries will still be saved.',
+  )
   const [tab, setTab] = useState('workouts')
   const [activeWorkoutId, setActiveWorkoutId] = useState(null)
   const [progressExercise, setProgressExercise] = useState(null)
@@ -54,25 +72,63 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [catalogFilter, setCatalogFilter] = useState('current')
   const [justAdded, setJustAdded] = useState(null)
+  const flashTimer = useRef(null)
+  const importInput = useRef(null)
 
+  const [restEndsAt, setRestEndsAt] = useState(null)
   const [restLeft, setRestLeft] = useState(0)
 
-  useEffect(() => { saveData(data) }, [data])
-
+  // Skip the mount-time save: if loading failed we must not overwrite whatever is in storage
+  // until the user actually changes something.
+  const isFirstSave = useRef(true)
   useEffect(() => {
-    if (restLeft <= 0) return undefined
-    const t = setTimeout(() => {
-      if (restLeft === 1 && navigator.vibrate) navigator.vibrate([200, 100, 200])
-      setRestLeft(restLeft - 1)
-    }, 1000)
-    return () => clearTimeout(t)
-  }, [restLeft])
+    if (isFirstSave.current) { isFirstSave.current = false; return }
+    if (!saveData(data)) setStorageNotice('Could not save. Storage may be full or blocked (private browsing).')
+    else if (storageNotice?.startsWith('Could not save')) setStorageNotice(null)
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Derive the countdown from a wall-clock deadline so it stays correct after the phone is locked.
+  useEffect(() => {
+    if (!restEndsAt) { setRestLeft(0); return undefined }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((restEndsAt - Date.now()) / 1000))
+      setRestLeft(left)
+      if (left === 0) {
+        setRestEndsAt(null)
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200])
+      }
+    }
+    tick()
+    const interval = setInterval(tick, 500)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', tick) }
+  }, [restEndsAt])
+
+  const modalOpen = showNewWorkout || showAddExercise
+  useEffect(() => {
+    document.body.style.overflow = modalOpen ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [modalOpen])
 
   const activeWorkout = data.workouts.find(w => w.id === activeWorkoutId) || null
   const sortedWorkouts = useMemo(
-    () => [...data.workouts].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    () => [...data.workouts].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [data.workouts],
   )
+
+  // Previous best set per exercise, excluding the session currently open.
+  const lastByExercise = useMemo(() => {
+    const rows = activeWorkoutId ? data.history.filter(h => h.workoutId !== activeWorkoutId) : data.history
+    const map = new Map()
+    for (const name of new Set(rows.map(h => h.exercise))) map.set(name, lastPerformance(rows, name))
+    return map
+  }, [data.history, activeWorkoutId])
+
+  const seriesByExercise = useMemo(() => {
+    const map = new Map()
+    for (const name of listTrackedExercises(data.history)) map.set(name, buildExerciseSeries(data.history, name))
+    return map
+  }, [data.history])
 
   // ---------- workout mutations ----------
 
@@ -90,7 +146,7 @@ export default function App() {
       splitId,
       createdAt: new Date().toISOString(),
       exercises: withExercises
-        ? split.exercises.map(name => newExercise(name, lastPerformance(data.history, name)?.maxWeight || ''))
+        ? split.exercises.map(name => newExercise(name, lastWeightFor(data.history, name)))
         : [],
     }
     setData(prev => ({ ...prev, workouts: [...prev.workouts, workout] }))
@@ -114,6 +170,7 @@ export default function App() {
   }
 
   const deleteWorkout = (workoutId) => {
+    if (!window.confirm('Delete this workout and all sets logged in it?')) return
     setData(prev => ({
       ...prev,
       workouts: prev.workouts.filter(w => w.id !== workoutId),
@@ -125,17 +182,20 @@ export default function App() {
   const addExerciseToActive = (name) => {
     const trimmed = name.trim()
     if (!trimmed || !activeWorkout) return
-    const lastWeight = lastPerformance(data.history, trimmed)?.maxWeight || ''
-    updateWorkout(activeWorkout.id, w => ({ ...w, exercises: [...w.exercises, newExercise(trimmed, lastWeight)] }))
+    updateWorkout(activeWorkout.id, w => ({ ...w, exercises: [...w.exercises, newExercise(trimmed, lastWeightFor(data.history, trimmed))] }))
     setJustAdded(trimmed)
-    setTimeout(() => setJustAdded(null), 900)
+    clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setJustAdded(null), 900)
   }
 
   const deleteExercise = (exerciseId) => {
+    const exercise = activeWorkout.exercises.find(e => e.id === exerciseId)
+    const logged = exercise?.sets.some(s => s.completed && hasValues(s))
+    if (logged && !window.confirm(`Remove ${exercise.name} and its logged sets from this session?`)) return
     updateWorkout(activeWorkout.id, w => ({ ...w, exercises: w.exercises.filter(e => e.id !== exerciseId) }))
     setData(prev => ({
       ...prev,
-      history: prev.history.filter(h => !(h.workoutId === activeWorkout.id && h.setKey?.startsWith(`${activeWorkout.id}:${exerciseId}:`))),
+      history: prev.history.filter(h => !h.setKey?.startsWith(`${activeWorkout.id}:${exerciseId}:`)),
     }))
   }
 
@@ -154,10 +214,13 @@ export default function App() {
   }
 
   const deleteSet = (exerciseId, setId) => {
-    updateExercise(exerciseId, ex => (ex.sets.length > 1 ? { ...ex, sets: ex.sets.filter(s => s.id !== setId) } : ex))
+    const exercise = activeWorkout.exercises.find(e => e.id === exerciseId)
+    if (!exercise || exercise.sets.length <= 1) return
+    updateExercise(exerciseId, ex => ({ ...ex, sets: ex.sets.filter(s => s.id !== setId) }))
     setData(prev => ({ ...prev, history: prev.history.filter(h => h.setKey !== `${activeWorkout.id}:${exerciseId}:${setId}`) }))
   }
 
+  // A set belongs to its session's day, so editing a typo later never moves it to "today".
   const syncHistory = (prev, workout, exercise, set) => {
     const setKey = `${workout.id}:${exercise.id}:${set.id}`
     const others = prev.history.filter(h => h.setKey !== setKey)
@@ -165,7 +228,7 @@ export default function App() {
     const existing = prev.history.find(h => h.setKey === setKey)
     return [...others, {
       id: existing?.id || uid('h'),
-      date: existing?.date || new Date().toISOString(),
+      date: existing?.date || workout.createdAt,
       exercise: exercise.name,
       weight: set.weight,
       reps: set.reps,
@@ -197,7 +260,10 @@ export default function App() {
   const toggleSetComplete = (exerciseId, setId) => {
     // Decide about the rest timer from the current snapshot; the updater below may run lazily.
     const currentSet = activeWorkout?.exercises.find(e => e.id === exerciseId)?.sets.find(s => s.id === setId)
-    const startsRest = !!currentSet && !currentSet.completed && hasValues(currentSet)
+    if (!currentSet) return
+    // A set with no weight/reps has nothing to log, so it cannot be marked complete.
+    if (!currentSet.completed && !hasValues(currentSet)) return
+    const startsRest = !currentSet.completed
     setData(prev => {
       const workout = prev.workouts.find(w => w.id === activeWorkoutId)
       const exercise = workout?.exercises.find(e => e.id === exerciseId)
@@ -213,7 +279,24 @@ export default function App() {
       })
       return { ...prev, workouts, history: syncHistory(prev, workout, exercise, updated) }
     })
-    if (startsRest) setRestLeft(REST_SECONDS)
+    if (startsRest) setRestEndsAt(Date.now() + REST_SECONDS * 1000)
+  }
+
+  const importBackup = async (file) => {
+    if (!file) return
+    try {
+      const incoming = parseImport(await file.text())
+      const count = incoming.workouts.length
+      if (!window.confirm(`Replace everything in this app with the backup (${count} workout${count === 1 ? '' : 's'}, ${incoming.history.length} logged sets)?`)) return
+      setData(incoming)
+      setActiveWorkoutId(null)
+      setProgressExercise(null)
+      setStorageNotice(null)
+    } catch (err) {
+      window.alert(`Could not import: ${err.message}`)
+    } finally {
+      if (importInput.current) importInput.current.value = ''
+    }
   }
 
   // ---------- derived ----------
@@ -227,7 +310,8 @@ export default function App() {
     })
   }, [search, catalogFilter, activeWorkout])
 
-  const exactCatalogMatch = CATALOG.some(c => c.name.toLowerCase() === search.trim().toLowerCase())
+  // Only hide the custom-add button when the exact match is actually visible in the current list.
+  const exactCatalogMatch = filteredCatalog.some(c => c.name.toLowerCase() === search.trim().toLowerCase())
 
   const openAddExercise = () => {
     setSearch('')
@@ -235,10 +319,14 @@ export default function App() {
     setShowAddExercise(true)
   }
 
+  // Switching tabs keeps the open session so you can peek at Progress mid-workout;
+  // tapping the current tab again returns to its list.
   const goToTab = (next) => {
+    if (next === tab) {
+      setActiveWorkoutId(null)
+      setProgressExercise(null)
+    }
     setTab(next)
-    setActiveWorkoutId(null)
-    setProgressExercise(null)
   }
 
   // ---------- views ----------
@@ -283,7 +371,7 @@ export default function App() {
         )}
       </div>
       {sortedWorkouts.length > 0 && (
-        <button className="fab" onClick={() => setShowNewWorkout(true)} aria-label="Start workout"><PlusIcon className="fab-icon" /></button>
+        <button className={`fab ${restLeft > 0 ? 'raised' : ''}`} onClick={() => setShowNewWorkout(true)} aria-label="Start workout"><PlusIcon className="fab-icon" /></button>
       )}
     </>
   )
@@ -323,7 +411,7 @@ export default function App() {
             </div>
           ) : (
             w.exercises.map(ex => {
-              const last = lastPerformance(data.history.filter(h => h.workoutId !== w.id), ex.name)
+              const last = lastByExercise.get(ex.name) || null
               return (
                 <div key={ex.id} className="exercise-card">
                   <div className="exercise-header">
@@ -340,16 +428,18 @@ export default function App() {
                         <div className="set-inputs">
                           <label className="input-group">
                             <span className="input-label">lbs</span>
-                            <input type="number" className="input-field" value={set.weight} placeholder="0" inputMode="decimal"
-                              onChange={e => updateSetField(ex.id, set.id, 'weight', e.target.value)} />
+                            <input type="text" className="input-field" value={set.weight} placeholder="0" inputMode="decimal" autoComplete="off"
+                              onChange={e => updateSetField(ex.id, set.id, 'weight', sanitizeNumber(e.target.value, true))} />
                           </label>
                           <label className="input-group">
                             <span className="input-label">reps</span>
-                            <input type="number" className="input-field" value={set.reps} placeholder="0" inputMode="numeric"
-                              onChange={e => updateSetField(ex.id, set.id, 'reps', e.target.value)} />
+                            <input type="text" className="input-field" value={set.reps} placeholder="0" inputMode="numeric" pattern="[0-9]*" autoComplete="off"
+                              onChange={e => updateSetField(ex.id, set.id, 'reps', sanitizeNumber(e.target.value, false))} />
                           </label>
                         </div>
-                        <button className={`set-complete ${set.completed ? 'completed' : ''}`} onClick={() => toggleSetComplete(ex.id, set.id)} aria-label="Toggle set complete">
+                        <button className={`set-complete ${set.completed ? 'completed' : ''}`} onClick={() => toggleSetComplete(ex.id, set.id)}
+                          disabled={!set.completed && !hasValues(set)} aria-label={set.completed ? 'Mark set incomplete' : 'Mark set complete'}
+                          title={!set.completed && !hasValues(set) ? 'Enter weight and reps first' : undefined}>
                           <CheckIcon className="icon-small" />
                         </button>
                         <button className="icon-btn subtle" onClick={() => deleteSet(ex.id, set.id)} disabled={ex.sets.length === 1} aria-label="Remove set">
@@ -378,7 +468,7 @@ export default function App() {
 
   const renderHistory = () => {
     const grouped = new Map()
-    for (const h of [...data.history].sort((a, b) => (a.date < b.date ? 1 : -1))) {
+    for (const h of [...data.history].sort((a, b) => b.date.localeCompare(a.date))) {
       const key = dayKey(h.date)
       if (!grouped.has(key)) grouped.set(key, [])
       grouped.get(key).push(h)
@@ -421,8 +511,8 @@ export default function App() {
   }
 
   const renderProgressList = () => {
-    const stats = overallStats(data.history, data.workouts)
-    const exercises = listTrackedExercises(data.history)
+    const stats = overallStats(data.history)
+    const exercises = Array.from(seriesByExercise.keys())
     return (
       <>
         <header className="header">
@@ -447,7 +537,7 @@ export default function App() {
             <>
               <p className="section-title">Exercises</p>
               {exercises.map(name => {
-                const series = buildExerciseSeries(data.history, name)
+                const series = seriesByExercise.get(name)
                 const summary = summarizeSeries(series)
                 const split = getSplit(CATALOG.find(c => c.name === name)?.splitIds[0])
                 return (
@@ -464,7 +554,11 @@ export default function App() {
             </>
           )}
 
-          <button className="btn btn-ghost export-btn" onClick={() => exportData(data)}><DownloadIcon className="icon-small" /> Export backup</button>
+          <div className="backup-row">
+            <button className="btn btn-ghost" onClick={() => exportData(data)}><DownloadIcon className="icon-small" /> Export backup</button>
+            <button className="btn btn-ghost" onClick={() => importInput.current?.click()}>Import backup</button>
+            <input ref={importInput} type="file" accept="application/json,.json" hidden onChange={e => importBackup(e.target.files?.[0])} />
+          </div>
         </div>
       </>
     )
@@ -472,7 +566,7 @@ export default function App() {
 
   const renderProgressDetail = () => {
     const name = progressExercise
-    const series = buildExerciseSeries(data.history, name)
+    const series = seriesByExercise.get(name) || []
     if (series.length === 0) {
       return (
         <>
@@ -511,7 +605,7 @@ export default function App() {
               <span><i className="legend-swatch bar" /> Volume</span>
               <span><i className="legend-swatch ring" /> PR</span>
             </div>
-            <ProgressChart series={series} color={split.color} prIndex={summary.prIndex} />
+            <ProgressChart key={name} series={series} color={split.color} prIndex={summary.prIndex} />
             {series.length === 1 && <p className="chart-hint">Log this exercise in another session to see a trend line.</p>}
           </div>
 
@@ -549,7 +643,13 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${restLeft > 0 ? 'with-timer' : ''}`}>
+      {storageNotice && (
+        <div className="notice" role="alert">
+          <span>{storageNotice}</span>
+          <button className="icon-btn subtle" onClick={() => setStorageNotice(null)} aria-label="Dismiss"><CloseIcon className="icon-small" /></button>
+        </div>
+      )}
       {renderContent()}
 
       <nav className="bottom-nav">
@@ -570,7 +670,7 @@ export default function App() {
             <ClockIcon className="rest-timer-icon" />
             <div><div className="rest-timer-text">Rest</div><div className="rest-timer-time">{formatClock(restLeft)}</div></div>
           </div>
-          <button className="icon-btn subtle" onClick={() => setRestLeft(0)} aria-label="Dismiss timer"><CloseIcon className="icon-small" /></button>
+          <button className="icon-btn subtle" onClick={() => setRestEndsAt(null)} aria-label="Dismiss timer"><CloseIcon className="icon-small" /></button>
         </div>
       )}
 
@@ -605,7 +705,7 @@ export default function App() {
         <Modal title="Add Exercise" onClose={() => setShowAddExercise(false)}>
           <div className="modal-body">
             <input type="text" className="form-input" placeholder="Search or type a custom exercise" value={search}
-              onChange={e => setSearch(e.target.value)} autoFocus />
+              onChange={e => setSearch(e.target.value)} autoComplete="off" />
             {search.trim() && !exactCatalogMatch && (
               <button className="btn btn-secondary custom-add" onClick={() => { addExerciseToActive(search); setSearch('') }}>
                 <PlusIcon className="icon-small" /> Add “{search.trim()}”

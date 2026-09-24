@@ -7,8 +7,11 @@ export function estimate1RM(weight, reps) {
   return Math.round(w * (1 + r / 30))
 }
 
+// Local calendar day, so an evening session is not pushed into tomorrow by UTC.
 export function dayKey(isoDate) {
-  return isoDate.slice(0, 10)
+  const d = new Date(isoDate)
+  if (Number.isNaN(d.getTime())) return String(isoDate).slice(0, 10)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export function formatShortDate(key) {
@@ -80,12 +83,11 @@ export function lastPerformance(history, exerciseName) {
   return series.length ? series[series.length - 1] : null
 }
 
-export function overallStats(history, workouts) {
+export function overallStats(history) {
   const valid = history.filter(h => (parseFloat(h.weight) || 0) > 0 && (parseInt(h.reps, 10) || 0) > 0)
   const days = new Set(valid.map(h => dayKey(h.date)))
   return {
     trainingDays: days.size,
-    workouts: workouts.length,
     setsLogged: valid.length,
     totalVolume: valid.reduce((s, h) => s + parseFloat(h.weight) * parseInt(h.reps, 10), 0),
     exercises: new Set(valid.map(h => h.exercise)).size,
