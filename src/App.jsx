@@ -279,7 +279,15 @@ export default function App() {
       })
       return { ...prev, workouts, history: syncHistory(prev, workout, exercise, updated) }
     })
-    if (startsRest) setRestEndsAt(Date.now() + REST_SECONDS * 1000)
+    if (startsRest) {
+      setRestEndsAt(Date.now() + REST_SECONDS * 1000)
+      setRestLeft(REST_SECONDS)
+    }
+  }
+
+  const dismissRest = () => {
+    setRestEndsAt(null)
+    setRestLeft(0)
   }
 
   const importBackup = async (file) => {
@@ -670,7 +678,7 @@ export default function App() {
             <ClockIcon className="rest-timer-icon" />
             <div><div className="rest-timer-text">Rest</div><div className="rest-timer-time">{formatClock(restLeft)}</div></div>
           </div>
-          <button className="icon-btn subtle" onClick={() => setRestEndsAt(null)} aria-label="Dismiss timer"><CloseIcon className="icon-small" /></button>
+          <button className="icon-btn subtle" onClick={dismissRest} aria-label="Dismiss timer"><CloseIcon className="icon-small" /></button>
         </div>
       )}
 
