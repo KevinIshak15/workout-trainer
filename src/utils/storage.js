@@ -136,8 +136,11 @@ export async function exportData(data) {
 
 export function parseImport(text) {
   const parsed = JSON.parse(text)
-  if (!parsed || typeof parsed !== 'object') throw new Error('Not a workout backup file')
-  if (!parsed.version || parsed.version < 2) return migrateV1(parsed)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Not a workout backup file')
+  if (!parsed.version || parsed.version < 2) {
+    if (!parsed.days && !parsed.history) throw new Error('Not a workout backup file')
+    return migrateV1(parsed)
+  }
   if (!Array.isArray(parsed.workouts) || !Array.isArray(parsed.history)) throw new Error('Backup is missing workouts or history')
   return normalizeV2(parsed)
 }
