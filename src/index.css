@@ -86,8 +86,8 @@ body {
 .input-field::-webkit-outer-spin-button, .input-field::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .input-field:focus { outline: none; border-color: var(--primary); }
 
-.set-complete { flex: none; width: 44px; height: 44px; border-radius: 10px; border: 2px solid var(--border); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; color: transparent; transition: all 0.15s; }
-.set-complete:disabled { opacity: 0.35; cursor: not-allowed; }
+.set-complete { flex: none; width: 44px; height: 44px; border-radius: 10px; border: 2px solid #3f3f46; background: var(--bg-elevated); cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--text-muted); transition: all 0.15s; }
+.set-complete:disabled { opacity: 0.3; cursor: not-allowed; }
 .set-complete.completed { background: var(--success); border-color: var(--success); color: white; animation: pop 0.25s ease; }
 
 /* Buttons */
