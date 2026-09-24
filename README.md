@@ -1,18 +1,17 @@
 # Workout Trainer
 
-A beautiful personal workout trainer app designed for iPhone 15 Pro Max. Track your workout days, exercises, weights, and reps with an intuitive mobile-first interface.
+A beautiful personal workout trainer app designed for iPhone 15 Pro Max. Run your training split, log weight and reps per set, and watch each exercise's progress over time.
 
 ## Features
 
-- **Workout Days**: Create and manage workout days (Monday through Sunday)
-- **Exercise Tracking**: Add unlimited exercises to each workout day
-- **Sets Management**: Track multiple sets per exercise with weight and reps
-- **Progress Tracking**: Mark sets as complete and see your daily progress
-- **Rest Timer**: Automatic 90-second rest timer after completing a set
-- **History**: View your complete workout history organized by date
-- **Statistics**: Track total workouts, sets completed, volume, and unique exercises
-- **Offline Support**: Works without internet connection (PWA)
-- **Data Persistence**: All data saved locally on your device
+- **Split-based sessions**: Start a workout from your program — Chest/Tris, Back/Bis, Leg A, Leg B, or SARMs (Shoulders & Arms). Start the same split as many times as you like; every session is logged separately.
+- **Pre-filled exercises**: New sessions can be pre-loaded with the split's exercises, with your last working weight carried over. "Repeat this workout" clones a past session.
+- **Exercise catalog**: Every exercise in the program is one tap away, filtered by split, with search and custom entries.
+- **Sets, weight and reps**: Unlimited sets per exercise; completing a set logs it to history and starts a 90-second rest timer. Each exercise shows your last performance.
+- **Progress charts**: Per-exercise estimated 1RM trend (Epley), session volume bars, PR marker, trend since first session, and a session log.
+- **History**: Every completed set grouped by date, colour-coded by split.
+- **Backup**: Export all data as JSON from the Progress tab.
+- **Offline PWA**: Installs to the iPhone home screen and works without a connection. Data is stored in the browser (localStorage); older day-of-week data is migrated automatically.
 
 ## Installation on iPhone 15 Pro Max
 
@@ -31,18 +30,18 @@ Simply bookmark the URL in Safari or any browser for quick access.
 
 ## How to Use
 
-### Creating Workout Days
+### Starting a Workout
 
-1. Open the app and tap **"Add Workout Day"** or the **+** button
-2. Select the day of the week (e.g., Monday, Wednesday, Friday)
-3. The new day will appear in your workout list
+1. Tap **"Start Workout"** or the **+** button
+2. Pick a split (Chest/Tris, Back/Bis, Leg A, Leg B, SARMs)
+3. Leave **"Pre-fill exercises"** on to load the split's exercises, or turn it off to build the session by hand
+4. Start the same split again any time — each session is logged on its own
 
 ### Adding Exercises
 
-1. Tap on a workout day to open it
-2. Tap **"Add Exercise"** or the **+** button
-3. Enter the exercise name (e.g., "Bench Press", "Squats")
-4. The exercise will be added with one set ready to track
+1. Open a session and tap **"Add Exercise"** or the **+** button
+2. Tap any exercise in the catalog to add it (filtered to the current split by default; use the chips to browse other splits)
+3. Or type a name and tap **Add** to create a custom exercise
 
 ### Tracking Your Workout
 
@@ -59,10 +58,11 @@ Simply bookmark the URL in Safari or any browser for quick access.
 - The weight from your previous set is automatically copied
 - Tap the **×** button next to a set to delete it (if you have more than one)
 
-### Viewing History & Stats
+### History & Progress
 
-- Tap **"History"** in the bottom navigation to see all completed sets
-- Tap **"Stats"** to view your workout statistics
+- **History** lists every completed set grouped by date
+- **Progress** shows overall stats and one row per exercise with a sparkline and trend. Tap an exercise for the full chart: estimated 1RM line, volume bars, PR marker, and a session log. Tap any point on the chart to see that day's numbers.
+- **Export backup** (bottom of Progress) downloads all data as JSON
 
 ## Development
 
