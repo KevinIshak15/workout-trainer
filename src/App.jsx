@@ -5,8 +5,10 @@ import { loadData, saveData, exportData, parseImport, uid } from './utils/storag
 import {
   buildExerciseSeries, summarizeSeries, listTrackedExercises, lastPerformance,
   overallStats, formatShortDate, dayKey,
+  METRICS, RANGES, filterRange, toChartPoints, linearTrend, weeklyVolumeSeries,
+  prSeriesFor, prPoints, summarizePRs,
 } from './utils/progress'
-import ProgressChart, { Sparkline } from './components/ProgressChart'
+import LineChart, { Sparkline, formatFullDate } from './components/ProgressChart'
 import {
   DumbbellIcon, ClipboardIcon, TrendingIcon, ClockIcon, TrashIcon, CheckIcon,
   ChevronRightIcon, ChevronLeftIcon, CloseIcon, PlusIcon, TrophyIcon,
@@ -36,6 +38,27 @@ function formatClock(seconds) {
   return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
 }
 
+function todayInputValue() {
+  return dayKey(new Date().toISOString())
+}
+
+// A date picked in the form becomes local noon, so it never rolls into the neighbouring day.
+function inputDateToISO(value) {
+  const [y, m, d] = value.split('-').map(Number)
+  if (!y || !m || !d) return new Date().toISOString()
+  return new Date(y, m - 1, d, 12).toISOString()
+}
+
+function splitColorFor(exerciseName) {
+  return getSplit(CATALOG.find(c => c.name === exerciseName)?.splitIds[0]).color
+}
+
+function formatSigned(n, digits = 0) {
+  const rounded = Number(n.toFixed(digits))
+  if (rounded === 0) return '0'
+  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded)}`
+}
+
 function hasValues(set) {
   return (parseFloat(set.weight) || 0) > 0 && (parseInt(set.reps, 10) || 0) > 0
 }
@@ -63,6 +86,16 @@ export default function App() {
   const [tab, setTab] = useState('workouts')
   const [activeWorkoutId, setActiveWorkoutId] = useState(null)
   const [progressExercise, setProgressExercise] = useState(null)
+  const [metricId, setMetricId] = useState('e1rm')
+  const [rangeId, setRangeId] = useState('all')
+  const [chartSel, setChartSel] = useState(null)
+  const [weekSel, setWeekSel] = useState(null)
+
+  const [prExercise, setPrExercise] = useState(null)
+  const [prSel, setPrSel] = useState(null)
+  const [showRecordPR, setShowRecordPR] = useState(false)
+  const [prForm, setPrForm] = useState({ exercise: '', weight: '', date: todayInputValue(), note: '' })
+  const [prSearch, setPrSearch] = useState('')
 
   const [showNewWorkout, setShowNewWorkout] = useState(false)
   const [newSplitId, setNewSplitId] = useState(SPLITS[0].id)
@@ -104,7 +137,7 @@ export default function App() {
     return () => { clearInterval(interval); document.removeEventListener('visibilitychange', tick) }
   }, [restEndsAt])
 
-  const modalOpen = showNewWorkout || showAddExercise
+  const modalOpen = showNewWorkout || showAddExercise || showRecordPR
   useEffect(() => {
     document.body.style.overflow = modalOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
@@ -129,6 +162,53 @@ export default function App() {
     for (const name of listTrackedExercises(data.history)) map.set(name, buildExerciseSeries(data.history, name))
     return map
   }, [data.history])
+
+  const weeklyPoints = useMemo(() => weeklyVolumeSeries(data.history, 12), [data.history])
+  const prSummaries = useMemo(() => summarizePRs(data.prs), [data.prs])
+
+  const openProgress = (name) => {
+    setChartSel(null)
+    setProgressExercise(name)
+  }
+
+  const openPR = (name) => {
+    setPrSel(null)
+    setPrExercise(name)
+  }
+
+  // ---------- PR mutations ----------
+
+  const openRecordPR = (exercise = '') => {
+    setPrForm({ exercise, weight: '', date: todayInputValue(), note: '' })
+    setPrSearch('')
+    setShowRecordPR(true)
+  }
+
+  const savePR = () => {
+    const exercise = prForm.exercise.trim()
+    const weight = parseFloat(prForm.weight) || 0
+    if (!exercise || weight <= 0) return
+    const entry = {
+      id: uid('pr'),
+      exercise,
+      weight: String(weight),
+      date: inputDateToISO(prForm.date),
+      note: prForm.note.trim(),
+    }
+    setData(prev => ({ ...prev, prs: [...prev.prs, entry] }))
+    setShowRecordPR(false)
+    setPrSel(null)
+    if (tab === 'prs') setPrExercise(exercise)
+  }
+
+  const deletePR = (id) => {
+    const entry = data.prs.find(p => p.id === id)
+    if (!entry || !window.confirm(`Delete the ${entry.weight} lbs ${entry.exercise} PR?`)) return
+    setData(prev => ({ ...prev, prs: prev.prs.filter(p => p.id !== id) }))
+    setPrSel(null)
+    const remaining = data.prs.filter(p => p.id !== id && p.exercise === entry.exercise)
+    if (remaining.length === 0) setPrExercise(null)
+  }
 
   // ---------- workout mutations ----------
 
@@ -299,6 +379,7 @@ export default function App() {
       setData(incoming)
       setActiveWorkoutId(null)
       setProgressExercise(null)
+      setPrExercise(null)
       setStorageNotice(null)
     } catch (err) {
       window.alert(`Could not import: ${err.message}`)
@@ -333,9 +414,22 @@ export default function App() {
     if (next === tab) {
       setActiveWorkoutId(null)
       setProgressExercise(null)
+      setPrExercise(null)
     }
     setTab(next)
   }
+
+  // Exercise suggestions for the PR form: catalog plus anything custom already tracked or recorded.
+  const prExerciseOptions = useMemo(() => {
+    const names = new Set(CATALOG.map(c => c.name))
+    for (const h of data.history) names.add(h.exercise)
+    for (const p of data.prs) names.add(p.exercise)
+    const q = prSearch.trim().toLowerCase()
+    const recorded = new Set(data.prs.map(p => p.exercise))
+    return Array.from(names)
+      .filter(n => !q || n.toLowerCase().includes(q))
+      .sort((a, b) => (recorded.has(b) - recorded.has(a)) || a.localeCompare(b))
+  }, [data.history, data.prs, prSearch])
 
   // ---------- views ----------
 
@@ -521,20 +615,20 @@ export default function App() {
   const renderProgressList = () => {
     const stats = overallStats(data.history)
     const exercises = Array.from(seriesByExercise.keys())
+    const weekIdx = weekSel ?? weeklyPoints.length - 1
+    const week = weeklyPoints[weekIdx]
+    const prevWeek = weeklyPoints[weekIdx - 1]
+    const weekDelta = prevWeek && prevWeek.v > 0 ? Math.round(((week.v - prevWeek.v) / prevWeek.v) * 100) : null
+    const hasWeekly = weeklyPoints.some(p => p.v > 0)
     return (
       <>
         <header className="header">
           <h1>Progress</h1>
-          <p className="header-subtitle">Estimated 1RM trend per exercise</p>
+          <p className="header-subtitle">
+            {stats.trainingDays} training day{stats.trainingDays === 1 ? '' : 's'} · {stats.setsLogged} sets · {Math.round(stats.totalVolume).toLocaleString()} lbs lifted
+          </p>
         </header>
         <div className="content">
-          <div className="stats-grid">
-            <div className="stat-card"><div className="stat-value">{stats.trainingDays}</div><div className="stat-label">Training days</div></div>
-            <div className="stat-card"><div className="stat-value">{stats.setsLogged}</div><div className="stat-label">Sets logged</div></div>
-            <div className="stat-card"><div className="stat-value">{Math.round(stats.totalVolume).toLocaleString()}</div><div className="stat-label">Total volume (lbs)</div></div>
-            <div className="stat-card"><div className="stat-value">{stats.exercises}</div><div className="stat-label">Exercises tracked</div></div>
-          </div>
-
           {exercises.length === 0 ? (
             <div className="empty-state">
               <TrendingIcon className="icon-large" />
@@ -543,18 +637,42 @@ export default function App() {
             </div>
           ) : (
             <>
+              <div className="card chart-card">
+                <div className="chart-head">
+                  <div>
+                    <div className="chart-title">Weekly volume</div>
+                    <div className="chart-sub">Week of {formatShortDate(dayKey(new Date(week.t).toISOString()))}{week.sets ? ` · ${week.sets} sets` : ''}</div>
+                  </div>
+                  <div className="chart-head-right">
+                    <div className="chart-value">{week.v.toLocaleString()}<span> lbs</span></div>
+                    {weekDelta != null && <TrendPill pct={weekDelta} sessions={2} />}
+                  </div>
+                </div>
+                <LineChart
+                  points={weeklyPoints}
+                  color="#3b82f6"
+                  height={150}
+                  selected={weekIdx}
+                  onSelect={setWeekSel}
+                  showTrend={false}
+                  unit="lbs"
+                  emptyLabel="No volume yet"
+                />
+                {!hasWeekly && <p className="chart-hint">Your last 12 weeks will fill in as you train.</p>}
+              </div>
+
               <p className="section-title">Exercises</p>
               {exercises.map(name => {
                 const series = seriesByExercise.get(name)
                 const summary = summarizeSeries(series)
-                const split = getSplit(CATALOG.find(c => c.name === name)?.splitIds[0])
+                const color = splitColorFor(name)
                 return (
-                  <div key={name} className="card card-clickable progress-row" onClick={() => setProgressExercise(name)}>
+                  <div key={name} className="card card-clickable progress-row" onClick={() => openProgress(name)}>
                     <div className="progress-row-main">
                       <div className="exercise-name">{name}</div>
-                      <div className="workout-meta">{summary.sessions} session{summary.sessions === 1 ? '' : 's'} · best {summary.bestWeight} lbs</div>
+                      <div className="workout-meta">{summary.sessions} session{summary.sessions === 1 ? '' : 's'} · est. 1RM {summary.lastSession.e1rm} lbs</div>
                     </div>
-                    <Sparkline series={series} color={split.color} />
+                    <Sparkline points={toChartPoints(series, 'e1rm')} color={color} />
                     <TrendPill pct={summary.changePct} sessions={summary.sessions} />
                   </div>
                 )
@@ -574,8 +692,8 @@ export default function App() {
 
   const renderProgressDetail = () => {
     const name = progressExercise
-    const series = seriesByExercise.get(name) || []
-    if (series.length === 0) {
+    const fullSeries = seriesByExercise.get(name) || []
+    if (fullSeries.length === 0) {
       return (
         <>
           <header className="header">
@@ -586,53 +704,106 @@ export default function App() {
         </>
       )
     }
-    const summary = summarizeSeries(series)
-    const split = getSplit(CATALOG.find(c => c.name === name)?.splitIds[0])
+    const color = splitColorFor(name)
+    const metric = METRICS.find(m => m.id === metricId) || METRICS[0]
+    const series = filterRange(fullSeries, rangeId)
+    const points = toChartPoints(series, metric.id)
+    const summary = summarizeSeries(fullSeries)
+    const rangeSummary = series.length ? summarizeSeries(series) : null
+    const prIndex = rangeSummary ? rangeSummary.prIndex : -1
+    const selIdx = chartSel != null && chartSel < points.length ? chartSel : points.length - 1
+    const selPoint = points[selIdx]
+    const first = points[0]
+    const changePct = first && first.v > 0 && selPoint ? Math.round(((selPoint.v - first.v) / first.v) * 100) : 0
+    const trend = linearTrend(points)
+    const recordedPR = prSummaries.find(p => p.exercise === name)
+
     return (
       <>
         <header className="header">
           <button className="header-back" onClick={() => setProgressExercise(null)}><ChevronLeftIcon className="icon-small" /> Progress</button>
           <h1>{name}</h1>
-          <p className="header-subtitle">{summary.sessions} session{summary.sessions === 1 ? '' : 's'} · first logged {formatShortDate(series[0].date)}</p>
+          <p className="header-subtitle">{summary.sessions} session{summary.sessions === 1 ? '' : 's'} · first logged {formatShortDate(fullSeries[0].date)}</p>
         </header>
         <div className="content">
-          <div className="hero-stats">
-            <div className="hero-stat">
-              <div className="hero-stat-label">Est. 1RM</div>
-              <div className="hero-stat-value" style={{ color: split.color }}>{summary.lastSession.e1rm}<span> lbs</span></div>
-            </div>
-            <div className="hero-stat">
-              <div className="hero-stat-label">Since first session</div>
-              <TrendPill pct={summary.changePct} sessions={summary.sessions} large />
-            </div>
+          <div className="segmented" role="tablist" aria-label="Metric">
+            {METRICS.map(m => (
+              <button key={m.id} role="tab" aria-selected={metricId === m.id} className={`segment ${metricId === m.id ? 'active' : ''}`}
+                onClick={() => { setMetricId(m.id); setChartSel(null) }}>{m.label}</button>
+            ))}
           </div>
 
           <div className="card chart-card">
-            <div className="chart-legend">
-              <span><i className="legend-swatch" style={{ backgroundColor: split.color }} /> Est. 1RM</span>
-              <span><i className="legend-swatch bar" /> Volume</span>
-              <span><i className="legend-swatch ring" /> PR</span>
+            <div className="chart-head">
+              <div>
+                <div className="chart-value big" style={{ color }}>
+                  {selPoint ? selPoint.v.toLocaleString() : '—'}<span> {metric.unit}</span>
+                </div>
+                <div className="chart-sub">{selPoint ? formatFullDate(selPoint.t) : 'No sessions in this range'}</div>
+              </div>
+              {points.length > 1 && (
+                <div className="chart-head-right">
+                  <TrendPill pct={changePct} sessions={points.length} />
+                  <div className="chart-sub">since {rangeId === 'all' ? 'first session' : 'start of range'}</div>
+                </div>
+              )}
             </div>
-            <ProgressChart key={name} series={series} color={split.color} prIndex={summary.prIndex} />
-            {series.length === 1 && <p className="chart-hint">Log this exercise in another session to see a trend line.</p>}
+
+            <LineChart
+              points={points}
+              color={color}
+              height={230}
+              selected={selIdx}
+              onSelect={setChartSel}
+              prIndex={metric.id === 'e1rm' ? prIndex : -1}
+              unit={metric.unit}
+            />
+
+            <div className="segmented small" role="tablist" aria-label="Time range">
+              {RANGES.map(r => (
+                <button key={r.id} role="tab" aria-selected={rangeId === r.id} className={`segment ${rangeId === r.id ? 'active' : ''}`}
+                  onClick={() => { setRangeId(r.id); setChartSel(null) }}>{r.label}</button>
+              ))}
+            </div>
+
+            {selPoint && (
+              <div className="chart-detail">
+                <div className="chart-detail-item"><span>Best set</span><strong>{selPoint.source.bestSet.weight} × {selPoint.source.bestSet.reps}</strong></div>
+                <div className="chart-detail-item"><span>Sets</span><strong>{selPoint.source.sets}</strong></div>
+                <div className="chart-detail-item"><span>Volume</span><strong>{Math.round(selPoint.source.volume).toLocaleString()}</strong></div>
+                <div className="chart-detail-item"><span>Est. 1RM</span><strong>{selPoint.source.e1rm}</strong></div>
+              </div>
+            )}
+
+            {points.length === 1 && <p className="chart-hint">Log this exercise again to draw a line.</p>}
+            {points.length === 2 && <p className="chart-hint">Drag on the chart to compare sessions. A trend line appears after three.</p>}
+            {trend && points.length >= 3 && (
+              <p className="trend-note">
+                <strong className={trend.perWeek > 0 ? 'up' : trend.perWeek < 0 ? 'down' : ''}>{formatSigned(trend.perWeek, 1)} {metric.unit} / week</strong>
+                {' '}across {points.length} sessions. Drag on the chart to inspect any session.
+              </p>
+            )}
           </div>
 
           <div className="pr-banner">
             <TrophyIcon className="icon-small" />
             <div>
-              <div className="pr-title">Personal record</div>
-              <div className="pr-detail">{series[summary.prIndex].bestSet.weight} lbs × {series[summary.prIndex].bestSet.reps} · est. {summary.bestE1rm} lbs · {formatShortDate(summary.prDate)}</div>
+              <div className="pr-title">Best session</div>
+              <div className="pr-detail">{fullSeries[summary.prIndex].bestSet.weight} lbs × {fullSeries[summary.prIndex].bestSet.reps} · est. {summary.bestE1rm} lbs · {formatShortDate(summary.prDate)}</div>
             </div>
           </div>
 
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-value">{summary.bestWeight}</div><div className="stat-label">Heaviest set (lbs)</div></div>
-            <div className="stat-card"><div className="stat-value">{Math.round(summary.totalVolume).toLocaleString()}</div><div className="stat-label">Lifetime volume</div></div>
+            <div className="stat-card card-clickable" onClick={() => { setTab('prs'); openPR(recordedPR ? name : null); if (!recordedPR) openRecordPR(name) }}>
+              <div className="stat-value" style={{ color: recordedPR ? 'var(--warning)' : undefined }}>{recordedPR ? recordedPR.best.w : '—'}</div>
+              <div className="stat-label">{recordedPR ? 'Recorded 1RM (lbs)' : 'Record a 1RM'}</div>
+            </div>
           </div>
 
           <p className="section-title">Session log</p>
           <div className="card">
-            {[...series].reverse().slice(0, 8).map(p => (
+            {[...fullSeries].reverse().slice(0, 8).map(p => (
               <div key={p.date} className="history-item">
                 <div className="history-exercise">{formatShortDate(p.date)}</div>
                 <div className="history-details">{p.sets} set{p.sets === 1 ? '' : 's'} · {p.bestSet.weight} × {p.bestSet.reps} · {Math.round(p.volume).toLocaleString()} vol</div>
@@ -644,9 +815,168 @@ export default function App() {
     )
   }
 
+  const renderPRList = () => {
+    const total = data.prs.length
+    return (
+      <>
+        <header className="header">
+          <h1>1-Rep PRs</h1>
+          <p className="header-subtitle">
+            {prSummaries.length === 0 ? 'Record your heaviest single lifts' : `${prSummaries.length} exercise${prSummaries.length === 1 ? '' : 's'} · ${total} lift${total === 1 ? '' : 's'} recorded`}
+          </p>
+        </header>
+        <div className="content">
+          {prSummaries.length === 0 ? (
+            <div className="empty-state">
+              <TrophyIcon className="icon-large" />
+              <h3 className="empty-state-title">No PRs recorded</h3>
+              <p className="empty-state-text">Log a true one-rep max and watch it climb over time</p>
+              <button className="btn btn-primary" onClick={() => openRecordPR()}>Record a PR</button>
+            </div>
+          ) : (
+            <>
+              <p className="section-title">Current bests</p>
+              {prSummaries.map(s => {
+                const color = splitColorFor(s.exercise)
+                const points = prPoints(prSeriesFor(data.prs, s.exercise))
+                const gain = s.previousBest ? s.best.w - s.previousBest.w : null
+                return (
+                  <div key={s.exercise} className="card card-clickable pr-row" onClick={() => openPR(s.exercise)}>
+                    <div className="pr-row-main">
+                      <div className="exercise-name">{s.exercise}</div>
+                      <div className="workout-meta">{formatShortDate(dayKey(s.best.date))} · {s.attempts} attempt{s.attempts === 1 ? '' : 's'}</div>
+                    </div>
+                    <Sparkline points={points} color={color} width={72} />
+                    <div className="pr-row-value">
+                      <div className="pr-weight" style={{ color }}>{s.best.w}<span> lbs</span></div>
+                      {gain != null && <div className={`pr-gain ${gain > 0 ? 'up' : ''}`}>{formatSigned(gain, 1)} lbs</div>}
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </div>
+        {prSummaries.length > 0 && (
+          <button className={`fab ${restLeft > 0 ? 'raised' : ''}`} onClick={() => openRecordPR()} aria-label="Record PR"><PlusIcon className="fab-icon" /></button>
+        )}
+      </>
+    )
+  }
+
+  const renderPRDetail = () => {
+    const name = prExercise
+    const series = prSeriesFor(data.prs, name)
+    if (series.length === 0) {
+      return (
+        <>
+          <header className="header">
+            <button className="header-back" onClick={() => setPrExercise(null)}><ChevronLeftIcon className="icon-small" /> PRs</button>
+            <h1>{name}</h1>
+          </header>
+          <div className="content">
+            <p className="empty-inline">No PRs recorded for this exercise yet.</p>
+            <button className="btn btn-primary" onClick={() => openRecordPR(name)}>Record a PR</button>
+          </div>
+        </>
+      )
+    }
+    const color = splitColorFor(name)
+    const points = prPoints(series)
+    const summary = prSummaries.find(s => s.exercise === name)
+    const bestIndex = series.findIndex(p => p.id === summary.best.id)
+    const selIdx = prSel != null && prSel < points.length ? prSel : points.length - 1
+    const sel = series[selIdx]
+    const gainSinceFirst = series.length > 1 ? summary.best.w - series[0].w : null
+    const trend = linearTrend(points)
+    const trainingSeries = seriesByExercise.get(name)
+    const trainingE1rm = trainingSeries ? summarizeSeries(trainingSeries).bestE1rm : null
+    const isBestSelected = sel.id === summary.best.id
+
+    return (
+      <>
+        <header className="header">
+          <button className="header-back" onClick={() => setPrExercise(null)}><ChevronLeftIcon className="icon-small" /> PRs</button>
+          <h1>{name}</h1>
+          <p className="header-subtitle">{series.length} attempt{series.length === 1 ? '' : 's'} · first recorded {formatShortDate(dayKey(series[0].date))}</p>
+        </header>
+        <div className="content">
+          <div className="card chart-card">
+            <div className="chart-head">
+              <div>
+                <div className="chart-value big" style={{ color }}>{sel.w}<span> lbs</span></div>
+                <div className="chart-sub">{formatFullDate(new Date(sel.date).getTime())}{isBestSelected ? ' · current best' : ''}</div>
+              </div>
+              {gainSinceFirst != null && (
+                <div className="chart-head-right">
+                  <span className={`trend-pill ${gainSinceFirst > 0 ? 'up' : gainSinceFirst < 0 ? 'down' : 'neutral'}`}>
+                    {gainSinceFirst > 0 && <ArrowUpIcon className="icon-xs" />}{formatSigned(gainSinceFirst, 1)} lbs
+                  </span>
+                  <div className="chart-sub">since first PR</div>
+                </div>
+              )}
+            </div>
+
+            <LineChart
+              points={points}
+              color={color}
+              height={220}
+              selected={selIdx}
+              onSelect={setPrSel}
+              prIndex={bestIndex}
+              unit="lbs"
+            />
+
+            {sel.note && <p className="chart-hint note">“{sel.note}”</p>}
+            {points.length === 1 && <p className="chart-hint">Record another attempt to see the line climb.</p>}
+            {trend && points.length >= 3 && (
+              <p className="trend-note">
+                <strong className={trend.perWeek > 0 ? 'up' : trend.perWeek < 0 ? 'down' : ''}>{formatSigned(trend.perWeek, 1)} lbs / week</strong>
+                {' '}across {points.length} attempts. Drag on the chart to inspect any attempt.
+              </p>
+            )}
+          </div>
+
+          <div className="stats-grid">
+            <div className="stat-card"><div className="stat-value" style={{ color: 'var(--warning)' }}>{summary.best.w}</div><div className="stat-label">Best 1RM (lbs)</div></div>
+            <div className="stat-card">
+              <div className="stat-value">{trainingE1rm ?? '—'}</div>
+              <div className="stat-label">{trainingE1rm ? 'Training est. 1RM' : 'No training data'}</div>
+            </div>
+          </div>
+          {trainingE1rm && (
+            <p className="compare-note">
+              {summary.best.w >= trainingE1rm
+                ? `Your recorded max beats the estimate from your working sets by ${formatSigned(summary.best.w - trainingE1rm, 1)} lbs.`
+                : `Your working sets estimate about ${trainingE1rm} lbs, ${(trainingE1rm - summary.best.w).toFixed(0)} lbs above your recorded max. A new PR may be waiting.`}
+            </p>
+          )}
+
+          <button className="btn btn-primary" onClick={() => openRecordPR(name)}><PlusIcon className="icon-small" /> Record new attempt</button>
+
+          <p className="section-title" style={{ marginTop: 20 }}>Attempts</p>
+          <div className="card">
+            {[...series].reverse().map(p => (
+              <div key={p.id} className={`history-item pr-attempt ${p.id === summary.best.id ? 'best' : ''}`}>
+                <div className="history-exercise">
+                  {formatShortDate(dayKey(p.date))}
+                  {p.id === summary.best.id && <span className="best-tag">Best</span>}
+                  {p.note && <div className="pr-note">{p.note}</div>}
+                </div>
+                <div className="history-details">{p.w} lbs</div>
+                <button className="icon-btn subtle" onClick={() => deletePR(p.id)} aria-label="Delete PR"><TrashIcon className="icon-small" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </>
+    )
+  }
+
   const renderContent = () => {
     if (tab === 'history') return renderHistory()
     if (tab === 'progress') return progressExercise ? renderProgressDetail() : renderProgressList()
+    if (tab === 'prs') return prExercise ? renderPRDetail() : renderPRList()
     return activeWorkout ? renderWorkoutDetail() : renderWorkoutList()
   }
 
@@ -669,6 +999,9 @@ export default function App() {
         </button>
         <button className={`nav-item ${tab === 'progress' ? 'active' : ''}`} onClick={() => goToTab('progress')}>
           <TrendingIcon className="nav-icon" /><span className="nav-item-label">Progress</span>
+        </button>
+        <button className={`nav-item ${tab === 'prs' ? 'active' : ''}`} onClick={() => goToTab('prs')}>
+          <TrophyIcon className="nav-icon" /><span className="nav-item-label">PRs</span>
         </button>
       </nav>
 
@@ -748,6 +1081,81 @@ export default function App() {
           </div>
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => setShowAddExercise(false)}>Done</button>
+          </div>
+        </Modal>
+      )}
+
+      {showRecordPR && (
+        <Modal title="Record 1-Rep PR" onClose={() => setShowRecordPR(false)}>
+          <div className="modal-body">
+            {prForm.exercise ? (
+              <div className="pr-form-exercise">
+                <div>
+                  <div className="input-label">Exercise</div>
+                  <div className="pr-form-exercise-name">{prForm.exercise}</div>
+                </div>
+                <button className="btn btn-ghost pr-change" onClick={() => setPrForm(f => ({ ...f, exercise: '' }))}>Change</button>
+              </div>
+            ) : (
+              <>
+                <input type="text" className="form-input" placeholder="Search or type an exercise" value={prSearch}
+                  onChange={e => setPrSearch(e.target.value)} autoComplete="off" autoFocus />
+                {prSearch.trim() && !prExerciseOptions.some(n => n.toLowerCase() === prSearch.trim().toLowerCase()) && (
+                  <button className="btn btn-secondary custom-add" onClick={() => setPrForm(f => ({ ...f, exercise: prSearch.trim() }))}>
+                    <PlusIcon className="icon-small" /> Use “{prSearch.trim()}”
+                  </button>
+                )}
+                <div className="catalog-list pr-picker">
+                  {prExerciseOptions.map(name => {
+                    const existing = prSummaries.find(s => s.exercise === name)
+                    return (
+                      <button key={name} className="catalog-item" onClick={() => setPrForm(f => ({ ...f, exercise: name }))}>
+                        <span className="catalog-item-name">{name}</span>
+                        <span className="catalog-item-right">
+                          {existing && <span className="count-pill">{existing.best.w} lbs</span>}
+                          <ChevronRightIcon className="icon-small" />
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {prForm.exercise && (
+              <div className="pr-form-fields">
+                <label className="input-group">
+                  <span className="input-label">Weight (lbs)</span>
+                  <input type="text" className="form-input pr-weight-input" value={prForm.weight} placeholder="0" inputMode="decimal" autoComplete="off" autoFocus
+                    onChange={e => setPrForm(f => ({ ...f, weight: sanitizeNumber(e.target.value, true) }))} />
+                </label>
+                <label className="input-group">
+                  <span className="input-label">Date</span>
+                  <input type="date" className="form-input" value={prForm.date} max={todayInputValue()}
+                    onChange={e => setPrForm(f => ({ ...f, date: e.target.value || todayInputValue() }))} />
+                </label>
+                <label className="input-group">
+                  <span className="input-label">Note (optional)</span>
+                  <input type="text" className="form-input" value={prForm.note} placeholder="Belt, paused, felt easy…" maxLength={80}
+                    onChange={e => setPrForm(f => ({ ...f, note: e.target.value }))} />
+                </label>
+                {(() => {
+                  const current = prSummaries.find(s => s.exercise === prForm.exercise)
+                  const w = parseFloat(prForm.weight) || 0
+                  if (!current || w <= 0) return null
+                  const diff = w - current.best.w
+                  return (
+                    <p className={`pr-compare ${diff > 0 ? 'up' : ''}`}>
+                      {diff > 0 ? `New PR: ${formatSigned(diff, 1)} lbs over your ${current.best.w} lbs best.` : `Current best is ${current.best.w} lbs. This attempt will still be saved.`}
+                    </p>
+                  )
+                })()}
+              </div>
+            )}
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-secondary" onClick={() => setShowRecordPR(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={savePR} disabled={!prForm.exercise || (parseFloat(prForm.weight) || 0) <= 0}>Save PR</button>
           </div>
         </Modal>
       )}

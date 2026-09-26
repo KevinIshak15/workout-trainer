@@ -7,7 +7,7 @@ export function uid(prefix = '') {
 }
 
 export function emptyData() {
-  return { version: SCHEMA_VERSION, workouts: [], history: [] }
+  return { version: SCHEMA_VERSION, workouts: [], history: [], prs: [] }
 }
 
 const LEGACY_DAY_NAMES = {
@@ -72,7 +72,7 @@ function migrateV1(data) {
   })
 
   for (const w of workouts) delete w.legacyDayId
-  return { version: SCHEMA_VERSION, workouts, history }
+  return { version: SCHEMA_VERSION, workouts, history, prs: [] }
 }
 
 function normalizeV2(parsed) {
@@ -80,6 +80,7 @@ function normalizeV2(parsed) {
     version: SCHEMA_VERSION,
     workouts: Array.isArray(parsed.workouts) ? parsed.workouts : [],
     history: Array.isArray(parsed.history) ? parsed.history : [],
+    prs: Array.isArray(parsed.prs) ? parsed.prs : [],
   }
 }
 
