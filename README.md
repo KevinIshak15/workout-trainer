@@ -8,7 +8,8 @@ A beautiful personal workout trainer app designed for iPhone 15 Pro Max. Run you
 - **Pre-filled exercises**: New sessions can be pre-loaded with the split's exercises, with your last working weight carried over. "Repeat this workout" clones a past session.
 - **Exercise catalog**: Every exercise in the program is one tap away, filtered by split, with search and custom entries.
 - **Sets, weight and reps**: Unlimited sets per exercise; completing a set logs it to history and starts a 90-second rest timer. Each exercise shows your last performance.
-- **Progress charts**: Per-exercise estimated 1RM trend (Epley), session volume bars, PR marker, trend since first session, and a session log.
+- **Progress line graphs**: Weekly volume overview plus an interactive per-exercise line chart. Switch between estimated 1RM (Epley), max weight, volume and reps; filter by 1M/3M/6M/1Y/All; drag along the line to inspect any session; a dashed trend line shows your rate of change per week and the best session is ringed.
+- **1-Rep PRs**: A dedicated tab to record true one-rep maxes per exercise with date and note. See current bests, every attempt, a PR line chart, and how your recorded max compares to the 1RM estimated from your working sets.
 - **History**: Every completed set grouped by date, colour-coded by split.
 - **Backup**: Export all data as JSON from the Progress tab.
 - **Offline PWA**: Installs to the iPhone home screen and works without a connection. Data is stored in the browser (localStorage); older day-of-week data is migrated automatically.
@@ -61,7 +62,8 @@ Simply bookmark the URL in Safari or any browser for quick access.
 ### History & Progress
 
 - **History** lists every completed set grouped by date
-- **Progress** shows overall stats and one row per exercise with a sparkline and trend. Tap an exercise for the full chart: estimated 1RM line, volume bars, PR marker, and a session log. Tap any point on the chart to see that day's numbers.
+- **Progress** shows a weekly volume line and one row per exercise with a sparkline and trend. Tap an exercise for the full line chart: pick a metric (Est. 1RM, Max weight, Volume, Reps), pick a time range, and drag across the line to read any session's numbers.
+- **PRs** is where you record real one-rep maxes. Tap **+**, choose the exercise, enter the weight and date, and save. Each exercise shows its current best, a PR line chart, and the full list of attempts.
 - **Export backup** (bottom of Progress) downloads all data as JSON
 
 ## Development

@@ -655,6 +655,7 @@ export default function App() {
                   selected={weekIdx}
                   onSelect={setWeekSel}
                   showTrend={false}
+                  smooth={false}
                   unit="lbs"
                   emptyLabel="No volume yet"
                 />
@@ -959,8 +960,10 @@ export default function App() {
             {[...series].reverse().map(p => (
               <div key={p.id} className={`history-item pr-attempt ${p.id === summary.best.id ? 'best' : ''}`}>
                 <div className="history-exercise">
-                  {formatShortDate(dayKey(p.date))}
-                  {p.id === summary.best.id && <span className="best-tag">Best</span>}
+                  <span className="pr-attempt-date">
+                    {formatShortDate(dayKey(p.date))}
+                    {p.id === summary.best.id && <span className="best-tag">Best</span>}
+                  </span>
                   {p.note && <div className="pr-note">{p.note}</div>}
                 </div>
                 <div className="history-details">{p.w} lbs</div>

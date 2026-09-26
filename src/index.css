@@ -252,7 +252,7 @@ body {
 .pr-gain.up { color: var(--success); }
 .compare-note { font-size: 13px; color: var(--text-secondary); line-height: 1.45; margin: -8px 0 16px; padding: 0 4px; }
 .pr-attempt .history-exercise { display: flex; flex-direction: column; gap: 1px; }
-.pr-attempt .history-exercise > :first-child { display: inline-flex; align-items: center; gap: 8px; }
+.pr-attempt-date { display: inline-flex; align-items: center; gap: 8px; }
 .best-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--warning); background: rgba(245, 158, 11, 0.12); border-radius: 5px; padding: 1px 6px; }
 .pr-attempt.best .history-details { color: var(--warning); font-weight: 600; }
 .pr-note { font-size: 12px; color: var(--text-muted); font-weight: 400; }

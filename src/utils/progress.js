@@ -154,7 +154,7 @@ export function niceTicks(min, max, target = 4) {
   const rawStep = (max - min) / target
   const mag = 10 ** Math.floor(Math.log10(rawStep))
   const norm = rawStep / mag
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag
   const ticks = []
   for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) ticks.push(Math.round(v * 1e6) / 1e6)
   return ticks

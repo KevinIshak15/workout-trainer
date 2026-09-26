@@ -57,7 +57,11 @@ function smoothPath(pts) {
 
 function compact(v) {
   if (Math.abs(v) >= 10000) return `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k`
-  return Number.isInteger(v) ? String(v) : v.toFixed(1)
+  return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(1)
+}
+
+function linearPath(pts) {
+  return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
 }
 
 function formatAxisDate(t, spanDays) {
@@ -76,7 +80,7 @@ export function formatFullDate(t) {
  */
 export default function LineChart({
   points, color, height = 220, selected, onSelect, prIndex = -1,
-  showTrend = true, showPoints = true, unit = '', yFormat = compact, emptyLabel = 'No data in this range',
+  showTrend = true, showPoints = true, smooth = true, unit = '', yFormat = compact, emptyLabel = 'No data in this range',
 }) {
   const wrapRef = useRef(null)
   const width = useWidth(wrapRef)
@@ -106,7 +110,7 @@ export default function LineChart({
     const yAt = v => PAD.top + innerH - ((v - lo) / (hi - lo)) * innerH
 
     const pts = points.map(p => ({ x: xAt(p.t), y: yAt(p.v), p }))
-    const line = smoothPath(pts)
+    const line = smooth ? smoothPath(pts) : linearPath(pts)
     const baseline = PAD.top + innerH
     const area = n > 1 ? `${line} L${pts[n - 1].x.toFixed(1)},${baseline} L${pts[0].x.toFixed(1)},${baseline} Z` : ''
 
@@ -126,7 +130,7 @@ export default function LineChart({
     }))
 
     return { pts, line, area, ticks, yAt, baseline, trendLine, labels, innerW }
-  }, [points, width, height, showTrend])
+  }, [points, width, height, showTrend, smooth])
 
   const pointerToIndex = (clientX) => {
     if (!geo || !wrapRef.current) return -1
